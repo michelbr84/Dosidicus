@@ -22,5 +22,8 @@
         "mobile_dosidicus/.buildozer/": true,
         "mobile_dosidicus/bin/": true,
         "mobile_dosidicus/logs/": true
-    }
+    },
+    "java.project.excludedFolders": [
+        "mobile_dosidicus/build"
+    ]
 }
