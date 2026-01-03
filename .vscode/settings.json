@@ -1,5 +1,26 @@
 {
     "files.associations": {
         "RECORD": "plaintext"
+    },
+    "files.exclude": {
+        "mobile_dosidicus/build/": true,
+        "mobile_dosidicus/.briefcase/": true,
+        "mobile_dosidicus/.buildozer/": true,
+        "mobile_dosidicus/bin/": true,
+        "mobile_dosidicus/logs/": true
+    },
+    "files.watcherExclude": {
+        "mobile_dosidicus/build/": true,
+        "mobile_dosidicus/.briefcase/": true,
+        "mobile_dosidicus/.buildozer/": true,
+        "mobile_dosidicus/bin/": true,
+        "mobile_dosidicus/logs/": true
+    },
+    "search.exclude": {
+        "mobile_dosidicus/build/": true,
+        "mobile_dosidicus/.briefcase/": true,
+        "mobile_dosidicus/.buildozer/": true,
+        "mobile_dosidicus/bin/": true,
+        "mobile_dosidicus/logs/": true
     }
 }

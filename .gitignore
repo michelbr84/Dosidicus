@@ -113,3 +113,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Mobile app build and generated directories
+mobile_dosidicus/build/
+mobile_dosidicus/.briefcase/
+mobile_dosidicus/.buildozer/
+mobile_dosidicus/bin/
+mobile_dosidicus/logs/
