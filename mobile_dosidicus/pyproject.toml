@@ -1,0 +1,33 @@
+[build-system]
+requires = ["briefcase"]
+
+[tool.briefcase]
+project_name = "Mobile Dosidicus"
+bundle = "com.vicioussquid.mobile-dosidicus"
+version = "0.0.1"
+url = "https://github.com/ViciousSquid/Dosidicus"
+license.file = "../LICENSE"
+author = "ViciousSquid"
+author_email = "vicioussquid@example.com"
+
+[tool.briefcase.app.mobile_dosidicus]
+formal_name = "Mobile Dosidicus"
+description = "Mobile version of the Dosidicus digital pet"
+icon = "squid"
+sources = ["mobile_dosidicus"]
+requires = ["toga"]
+
+[tool.briefcase.app.mobile_dosidicus.macOS]
+requires = []
+
+[tool.briefcase.app.mobile_dosidicus.linux]
+requires = []
+
+[tool.briefcase.app.mobile_dosidicus.windows]
+requires = []
+
+[tool.briefcase.app.mobile_dosidicus.iOS]
+requires = []
+
+[tool.briefcase.app.mobile_dosidicus.android]
+requires = []

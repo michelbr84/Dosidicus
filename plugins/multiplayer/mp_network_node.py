@@ -1,21 +1,43 @@
 # File: mp_network_node.py
 
+from __future__ import annotations
+
 import uuid
 import time
 import socket
 import queue # Retaining import
 import zlib
 import json
-import traceback # Retaining import
 import threading
 import logging # Ensure logging is imported
+
+from typing import Dict, Any, Optional, List, Tuple, cast
 
 # Import constants
 from .mp_constants import MULTICAST_GROUP, MULTICAST_PORT, MAX_PACKET_SIZE
 
 
 class NetworkNode:
-    def __init__(self, node_id=None, logger=None):
+    node_id: str
+    logger: logging.Logger
+    local_ip: str
+    socket: Optional[socket.socket]
+    initialized: bool
+    is_connected: bool
+    _is_listening_active: bool
+    listener_thread: Optional[threading.Thread]
+    last_connection_attempt: float
+    connection_retry_interval: float
+    auto_reconnect: bool
+    use_compression: bool
+    incoming_queue: queue.Queue[Dict[str, Any]]
+    queue_lock: threading.Lock
+    known_nodes: Dict[str, Tuple[str, float, Dict[str, Any]]]
+    last_sync_time: float
+    debug_mode: bool
+    utils: Optional[Any]
+
+    def __init__(self, node_id: Optional[str] = None, logger: Optional[logging.Logger] = None):
         """
         Represents a networked node in the multiplayer system.
 
@@ -100,7 +122,7 @@ class NetworkNode:
             # SO_REUSEPORT allows multiple processes to bind to the same port, useful for testing on one machine
             if hasattr(socket, "SO_REUSEPORT"):
                 try:
-                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)  # type: ignore
                 except OSError as e:
                     if self.debug_mode: self.logger.debug(f"SO_REUSEPORT not supported or error setting it: {e}")
 
@@ -174,7 +196,7 @@ class NetworkNode:
                     continue # Retry connection
 
             try:
-                raw_data, addr = self.socket.recvfrom(MAX_PACKET_SIZE)
+                raw_data, addr = cast(socket.socket, self.socket).recvfrom(MAX_PACKET_SIZE)
 
                 if raw_data:
                     # Use the thread-safe queue for passing data to the main thread
@@ -215,7 +237,7 @@ class NetworkNode:
         try:
             self._is_listening_active = True # Set flag before starting thread
             self.listener_thread = threading.Thread(target=self._listen_for_multicast, daemon=True)
-            self.listener_thread.setName(f"MPNodeListener-{self.node_id[:4]}") # Helpful for debugging threads
+            self.listener_thread.name = f"MPNodeListener-{self.node_id[:4]}" # Helpful for debugging threads
             self.listener_thread.start()
             self.logger.info("Listener thread started successfully.")
             return True
@@ -268,7 +290,7 @@ class NetworkNode:
             self.logger.error("Reconnect failed: Could not re-initialize socket structure.")
             return False
 
-    def send_message(self, message_type: str, payload: dict):
+    def send_message(self, message_type: str, payload: Dict[str, Any]):
         """Sends a single message to the multicast group."""
         if not self.is_connected: # Check if socket is ready
             self.logger.warning(f"Cannot send '{message_type}', socket not connected.")
@@ -280,7 +302,7 @@ class NetworkNode:
                  return False
 
         # Construct the full message with metadata
-        message_data = {
+        message_data: Dict[str, Any] = {
             'node_id': self.node_id,       # Sender's ID
             'timestamp': time.time(),    # Time of sending
             'type': message_type,        # Type of message (e.g., "squid_exit")
@@ -322,7 +344,7 @@ class NetworkNode:
             self.logger.error(f"Error sending message '{message_type}': {e}", exc_info=self.debug_mode)
         return False
 
-    def send_message_batch(self, messages: list):
+    def send_message_batch(self, messages: List[Tuple[str, Dict[str, Any]]]):
         """Sends a batch of messages in a single packet."""
         # Connection check similar to send_message
         if not self.is_connected:
@@ -335,7 +357,7 @@ class NetworkNode:
                  return False
 
         # Structure for batch message
-        batch_data = {
+        batch_data: Dict[str, Any] = {
             'node_id': self.node_id,
             'timestamp': time.time(),
             'batch': True, # Indicates this packet contains multiple messages
@@ -373,7 +395,7 @@ class NetworkNode:
             self.logger.error(f"Error sending message batch: {e}", exc_info=self.debug_mode)
         return False
 
-    def receive_messages(self):
+    def receive_messages(self) -> List[Tuple[Dict[str, Any], Tuple[str, int]]]:
         """
         Processes all currently queued raw datagrams from the listener thread.
         This should be called by the main application thread.
@@ -386,7 +408,7 @@ class NetworkNode:
             # self.logger.debug("receive_messages called but socket not initialized/connected.")
             return [] 
 
-        received_messages_this_call = []
+        received_messages_this_call: List[Tuple[Dict[str, Any], Tuple[str, int]]] = []
         
         # Process all items currently in the queue
         while not self.incoming_queue.empty():
@@ -427,19 +449,19 @@ class NetworkNode:
                     try:
                         if self.utils and hasattr(self.utils, 'decompress_message'):
                             # Assumes decompress_message returns a dict or raises error
-                            message_dict = self.utils.decompress_message(raw_data)
+                            message_dict = cast(Dict[str, Any], self.utils.decompress_message(raw_data))
                         else: # Fallback to direct zlib + json
                             data_for_json_decode = zlib.decompress(raw_data)
-                            message_dict = json.loads(data_for_json_decode.decode('utf-8'))
+                            message_dict = cast(Dict[str, Any], json.loads(data_for_json_decode.decode('utf-8')))
                         decoded_successfully = True
                     except (zlib.error, TypeError) as e_zlib: # TypeError if utils.decompress_message fails unexpectedly
                         # If zlib fails, it might be an uncompressed message. Try decoding raw_data as JSON.
                         if self.debug_mode: self.logger.debug(f"Zlib decompression failed from {addr} (Sender: {temp_node_id_peek}): {e_zlib}. Trying as uncompressed JSON.")
                         # data_for_json_decode remains raw_data
-                        message_dict = json.loads(raw_data.decode('utf-8'))
+                        message_dict = cast(Dict[str, Any], json.loads(raw_data.decode('utf-8')))
                         decoded_successfully = True # If this line is reached, uncompressed JSON was successful
                 else: # Not using compression, just decode JSON
-                    message_dict = json.loads(raw_data.decode('utf-8'))
+                    message_dict = cast(Dict[str, Any], json.loads(raw_data.decode('utf-8')))
                     decoded_successfully = True
             
             except (json.JSONDecodeError, UnicodeDecodeError) as e_decode:
@@ -449,11 +471,11 @@ class NetworkNode:
                 if self.debug_mode: self.logger.error(f"General error decoding packet from {addr} (Sender: {temp_node_id_peek}): {e_general_decode}", exc_info=True)
                 continue
 
-            if not decoded_successfully or not isinstance(message_dict, dict) or 'node_id' not in message_dict:
+            if not decoded_successfully or 'node_id' not in message_dict:
                 if self.debug_mode: self.logger.debug(f"Invalid or incomplete message structure after all decode attempts from {addr} (Sender: {temp_node_id_peek}): {message_dict}")
                 continue
             
-            final_sender_node_id = message_dict.get('node_id')
+            final_sender_node_id = cast(str, message_dict['node_id'])
             
             # Critical filter: Ignore messages from self
             if final_sender_node_id == self.node_id:
@@ -468,9 +490,9 @@ class NetworkNode:
             
             # Update known_nodes (this is a simplified version, a more robust presence system might be needed)
             # The payload of interest for squid's last known state might be deeper, e.g., message_dict['payload']['payload'] for SQUID_EXIT
-            squid_info_for_known_nodes = message_dict.get('payload', {}) 
+            squid_info_for_known_nodes: Dict[str, Any] = message_dict.get('payload', {})
             if message_dict.get('type') == 'squid_exit' and isinstance(squid_info_for_known_nodes.get('payload'), dict):
-                squid_info_for_known_nodes = squid_info_for_known_nodes.get('payload')
+                squid_info_for_known_nodes = cast(Dict[str, Any], squid_info_for_known_nodes.get('payload'))
 
             self.known_nodes[final_sender_node_id] = (addr[0], time.time(), squid_info_for_known_nodes)
             
@@ -480,13 +502,12 @@ class NetworkNode:
         return received_messages_this_call
 
 
-    def process_messages(self, plugin_manager_ref): 
+    def process_messages(self, plugin_manager_ref: Any) -> None:
         """
         Retrieves messages from the internal queue (filled by receive_messages via listener thread)
         and triggers hooks in the PluginManager.
         This method is intended to be called by the main application thread.
         """
-        messages_to_process_from_queue = []
         while not self.incoming_queue.empty(): # Drain the queue
             try:
                 # Item from queue is expected to be {'raw_data': ..., 'addr': ...} from _listen_for_multicast
@@ -494,14 +515,14 @@ class NetworkNode:
                 # Let's clarify: _listen_for_multicast puts raw data.
                 # receive_messages (called by this process_messages or similar) decodes them.
                 # This process_messages should be working with DECODED messages.
-                
+
                 # The current structure has receive_messages called by process_messages.
                 # So, call receive_messages first to get decoded messages.
                 decoded_messages_and_addrs = self.receive_messages() # This call processes the queue internally.
 
                 for message_data, addr in decoded_messages_and_addrs:
                     # Now message_data is a decoded dict
-                    if not isinstance(message_data, dict) or 'type' not in message_data or 'node_id' not in message_data:
+                    if 'type' not in message_data or 'node_id' not in message_data:
                         if self.debug_mode: self.logger.debug(f"process_messages: Discarding malformed message: {message_data}")
                         continue
 
