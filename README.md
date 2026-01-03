@@ -14,30 +14,41 @@ Digital pet squid with a dynamic neural network.
 <img width="2482" height="980" alt="image" src="https://github.com/user-attachments/assets/02119926-47f7-4bfb-96b9-457d470064e4" />
  <img src="https://github.com/user-attachments/assets/496cec0d-0810-4f47-8618-11165e0dd50d" width="380">
 
+## Project Overview
+
+**Project Name:** Dosidicus
+**Version:** 2.6.1.0 (main desktop app), 0.0.1 (mobile app)
+**Description:** A Tamagotchi-style digital pet simulator with an integrated neural network brain. The pet learns, adapts, and requires user interaction for care, feeding, and training. Features customizable neural networks for diverse behaviors and personalities.
+
+### Main Desktop Application
+- **Build System:** Managed with Poetry.
+- **Dependencies:**
+  - Python ^3.9
+  - PyQt5 ^5.15 (GUI framework)
+  - numpy ^1.21 (neural network computations)
+- **Core Structure:** Modular codebase in `src/` including brain designer, decision engine, learning algorithms, personality traits, memory management, UI components, and interaction systems. Entry point via `main.py`.
+
+### Mobile Application
+- **Build Tool:** Briefcase for cross-platform packaging.
+- **UI Framework:** Toga for native mobile interfaces.
+- **Supported Platforms:** macOS, Linux, Windows, iOS, Android.
+- **Bundle ID:** com.vicioussquid.mobile-dosidicus
+- **Description:** Portable version of Dosidicus for mobile devices, enabling pet care on-the-go.
+
+### Key Project Components
+- **Plugins System:** Extensible architecture with built-in plugins for achievements (tracking milestones) and multiplayer (networked interactions).
+- **Save System:** Persistent saves in `saves/` for pet states, autosaves, and achievement logs.
+- **Headless Mode:** Standalone training and simulation in `headless/` for GUI-less operation, ideal for background training or server environments.
+- **Custom Brains:** Library of pre-configured neural networks in `custom_brains/` (e.g., "Plant-Seeker", "Grasshopper") for quick behavior setup.
+- **Assets:** Comprehensive image assets in `images/` for UI, animations, decorations, and icons.
+- **Memory Management:** Dual memory system (`_memory/`) with long-term and short-term storage for learning persistence.
+- **Logs and Output:** Debugging logs in `logs/` and data export in `output/`.
+- **Examples and Tools:** Example squids, configuration files (`config.ini`), and version tracking.
+
+### Recent Fixes
+- Resolved an issue in `IPythonApp.java` within the mobile build process (details of the fix not specified in current repository files).
+
 Thank you for your interest in my project! Please fork and contribute!
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
