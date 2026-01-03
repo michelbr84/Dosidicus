@@ -1,0 +1,91 @@
+[
+    {
+        "timestamp": "2026-01-02T21:44:59.685742",
+        "category": "food",
+        "key": "sushi",
+        "value": "Ate sushi: Hunger -20.00, Happiness +6.50, Satisfaction +0.12",
+        "importance": 1.5,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:47:28.753588",
+        "category": "food",
+        "key": "cheese",
+        "value": "Ate cheese: Hunger -4.60, Happiness +0.20, Satisfaction +0.00",
+        "importance": 2.5,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:47:36.070490",
+        "category": "interaction",
+        "key": "poop_pickup",
+        "value": {
+            "item": null,
+            "position": [
+                163.0,
+                67.0
+            ],
+            "timestamp": "2026-01-02T21:45:42.065742"
+        },
+        "importance": 2.0,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:48:34.079398",
+        "category": "interaction",
+        "key": "rock_pickup",
+        "value": {
+            "item": "images/decoration/rock01.png",
+            "position": [
+                -40.0,
+                67.0
+            ],
+            "timestamp": "2026-01-02T21:48:22.077710"
+        },
+        "importance": 1.5,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:48:35.080478",
+        "category": "play",
+        "key": "rock_throwing",
+        "value": {
+            "activity": "rock_throwing",
+            "effects": {
+                "happiness": 9,
+                "satisfaction": 11,
+                "anxiety": -9
+            },
+            "description": "Had fun throwing a rock!",
+            "is_positive": true
+        },
+        "importance": 2.5,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:48:41.920027",
+        "category": "interaction",
+        "key": "plant_contact",
+        "value": {
+            "plant_key": "images/decoration/plant11.png",
+            "effect": "calming"
+        },
+        "importance": 2.0,
+        "related_neurons": [],
+        "access_count": 1
+    },
+    {
+        "timestamp": "2026-01-02T21:49:37.639493",
+        "category": "environment",
+        "key": "plant_calming_effect",
+        "value": "Being near plants is calming (Anxiety reduction)",
+        "importance": 1.5,
+        "related_neurons": [],
+        "access_count": 1
+    }
+]

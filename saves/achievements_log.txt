@@ -1,0 +1,12 @@
+first_feeding | Friday, January 02, 2026 @ 214354 | First Bite
+first_feeding | Friday, January 02, 2026 @ 214354 | First Bite
+curiosity_100 | Friday, January 02, 2026 @ 214400 | Curious George
+curiosity_100 | Friday, January 02, 2026 @ 214400 | Curious George
+first_decoration_push | Friday, January 02, 2026 @ 214406 | Interior Decorator
+first_plant_interact | Friday, January 02, 2026 @ 214406 | Green Thumb
+first_decoration_push | Friday, January 02, 2026 @ 214406 | Interior Decorator
+first_plant_interact | Friday, January 02, 2026 @ 214406 | Green Thumb
+fed_10_times | Friday, January 02, 2026 @ 214451 | Regular Meals
+fed_10_times | Friday, January 02, 2026 @ 214451 | Regular Meals
+first_clean | Friday, January 02, 2026 @ 214502 | First Scrub
+first_clean | Friday, January 02, 2026 @ 214502 | First Scrub
