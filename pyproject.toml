@@ -11,6 +11,7 @@ include = ["images/**/*", "plugins/**/*", "tools/**/*", "main.py", "config.ini"]
 python = "^3.9"
 PyQt5 = "^5.15"
 numpy = "^1.21"
+cryptography = "^42.0.0"
 
 [build-system]
 requires = ["poetry-core"]

@@ -142,9 +142,8 @@ class PacketValidator:
             obj['y'] = float(obj['y']) if isinstance(obj['y'], (int, float)) else 0
             if 'scale' in obj:
                 obj['scale'] = float(obj['scale']) if isinstance(obj['scale'], (int, float)) else 1.0
-                
-            # Limit to valid values
-            obj['scale'] = max(0.1, min(5.0, obj['scale']))  # Reasonable scale limits
+                # Limit to valid values
+                obj['scale'] = max(0.1, min(5.0, obj['scale']))  # Reasonable scale limits
             
             sanitized.append(obj)
             

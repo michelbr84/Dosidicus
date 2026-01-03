@@ -5,6 +5,7 @@ import traceback
 import math
 from queue import Queue, Empty
 from heapq import nlargest
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker, QWaitCondition
 
@@ -214,7 +215,9 @@ class BrainWorker(QThread):
             self.neurogenesis_result.emit({'should_create': False})
 
     def _perform_hebbian_learning(self):
-        """Hebbian learning with bug fix for weight lookup and custom neuron boost."""
+        """Optimized Hebbian learning with sampling and parallel processing for large networks."""
+        start_time = time.time()
+
         with QMutexLocker(self._cache_mutex):
             state = self.cache['state']
             weights = self.cache['weights']
@@ -230,33 +233,74 @@ class BrainWorker(QThread):
             return
 
         learning_candidates = [
-            n for n in neuron_list 
+            n for n in neuron_list
             if n not in excluded and n not in connector_neurons and n not in PURE_INPUTS
         ]
-        
+
         if len(learning_candidates) < 2:
             self.hebbian_result.emit({'updated_pairs': []})
             return
 
+        # PERFORMANCE OPTIMIZATION: For large networks, sample pairs instead of checking all
+        num_candidates = len(learning_candidates)
+        max_pairs_to_score = min(1000, num_candidates * (num_candidates - 1) // 2)  # Cap at 1000 pairs
+
+        if num_candidates > 50:  # Only sample for large networks
+            # Sample pairs efficiently
+            sampled_pairs = []
+            attempts = 0
+            max_attempts = max_pairs_to_score * 2
+
+            while len(sampled_pairs) < max_pairs_to_score and attempts < max_attempts:
+                n1 = random.choice(learning_candidates)
+                n2 = random.choice(learning_candidates)
+                if n1 != n2:
+                    pair = tuple(sorted((n1, n2)))
+                    if pair not in sampled_pairs:
+                        sampled_pairs.append(pair)
+                attempts += 1
+        else:
+            # For small networks, check all pairs
+            sampled_pairs = [(learning_candidates[i], learning_candidates[j])
+                           for i in range(num_candidates)
+                           for j in range(i + 1, num_candidates)]
+
+        # PARALLEL PROCESSING: Score pairs in parallel
+        def score_pair(pair):
+            n1, n2 = pair
+            v1 = self._get_neuron_value(state.get(n1, 50))
+            v2 = self._get_neuron_value(state.get(n2, 50))
+            score = v1 + v2 + random.uniform(0, 40)
+
+            pair_key = tuple(sorted((n1, n2)))
+            if pair_key in self._last_hebbian_pairs:
+                score -= 500
+
+            if n1 in custom_neurons or n2 in custom_neurons:
+                score += 15
+
+            return (score, n1, n2, v1, v2)
+
         scored_pairs = []
-        for i, n1 in enumerate(learning_candidates):
-            for n2 in learning_candidates[i + 1:]:
-                v1 = self._get_neuron_value(state.get(n1, 50))
-                v2 = self._get_neuron_value(state.get(n2, 50))
-                score = v1 + v2 + random.uniform(0, 40)
-
-                pair_key = tuple(sorted((n1, n2)))
-                if pair_key in self._last_hebbian_pairs:
-                    score -= 500
-                
-                if n1 in custom_neurons or n2 in custom_neurons:
-                    score += 15
-
-                scored_pairs.append((score, n1, n2, v1, v2))
+        if len(sampled_pairs) > 100:  # Use parallel processing for many pairs
+            with ThreadPoolExecutor(max_workers=min(4, len(sampled_pairs))) as executor:
+                futures = [executor.submit(score_pair, pair) for pair in sampled_pairs]
+                for future in as_completed(futures):
+                    scored_pairs.append(future.result())
+        else:
+            # Sequential for small numbers
+            for pair in sampled_pairs:
+                scored_pairs.append(score_pair(pair))
 
         top_k = config.neurogenesis.get('max_hebbian_pairs', 2) if hasattr(config, 'neurogenesis') else 2
         top_pairs = nlargest(top_k, scored_pairs)
         self._last_hebbian_pairs = [tuple(sorted((n1, n2))) for _, n1, n2, _, _ in top_pairs]
+
+        # Debug performance
+        elapsed = time.time() - start_time
+        if elapsed > 0.1:  # Log slow operations
+            print(f"🧵 Hebbian learning: {len(learning_candidates)} candidates, "
+                  f"{len(sampled_pairs)} pairs scored in {elapsed:.3f}s")
         
         weight_updates = {}
         updated_pairs_list = []
@@ -306,7 +350,9 @@ class BrainWorker(QThread):
         })
 
     def _process_state_update(self, data):
-        """Process state decay and noise logic."""
+        """Optimized state update with efficient sparse weight handling."""
+        start_time = time.time()
+
         if data.get('health_check'):
             self.state_update_result.emit({'health_check': True})
             return
@@ -319,56 +365,72 @@ class BrainWorker(QThread):
 
         updated_state = {}
 
-        # 1. Decay and Noise
+        # 1. Decay and Noise - O(n) operation
         for neuron, val in current_state.items():
             if neuron in excluded or neuron in PURE_INPUTS:
                 continue
-            
-            # Simple decay towards baseline
+
             if isinstance(val, (int, float)):
                 # Decay factor
-                decay = 0.95 
+                decay = 0.95
                 noise = random.uniform(-0.5, 0.5)
-                
+
                 # Custom neurons may have slightly different dynamics
-                # They decay a bit slower to maintain their learned state
                 if neuron in custom_neurons:
                     decay = 0.97  # Slower decay for custom neurons
-                
+
                 new_val = val * decay + noise
                 updated_state[neuron] = new_val
 
-        # 2. Connection effects (Simplified delta calculation)
+        # 2. Connection effects - Optimized for sparse weights O(E)
+        # Pre-compute valid source neurons to avoid repeated lookups
+        valid_sources = {n: v for n, v in current_state.items()
+                        if isinstance(v, (int, float))}
+
         connection_deltas = {}
-        
-        for (src, dst), w in weights.items():
-            if src in current_state and dst in current_state:
-                if dst in PURE_INPUTS: 
+
+        # For large networks, process in batches to avoid memory spikes
+        batch_size = 1000
+        weight_items = list(weights.items())
+
+        for i in range(0, len(weight_items), batch_size):
+            batch = weight_items[i:i + batch_size]
+
+            for (src, dst), w in batch:
+                # Skip if destination is input (protected)
+                if dst in PURE_INPUTS:
                     continue
-                
-                src_val = current_state[src]
-                if isinstance(src_val, (int, float)):
+
+                # Only process if source has valid activation
+                if src in valid_sources:
+                    src_val = valid_sources[src]
                     effect = src_val * w * 0.1
                     connection_deltas[dst] = connection_deltas.get(dst, 0) + effect
-                    
-        # Apply deltas
+
+        # Apply deltas efficiently
         for neuron, delta in connection_deltas.items():
             if neuron in updated_state:
                 updated_state[neuron] += delta
             elif neuron in current_state and neuron not in PURE_INPUTS:
                 updated_state[neuron] = current_state[neuron] + delta
 
-        # Clamp
+        # Clamp values
         final_state = {}
         for k, v in updated_state.items():
             final_state[k] = max(-100, min(100, v))
+
+        # Performance logging for slow operations
+        elapsed = time.time() - start_time
+        if elapsed > 0.05:  # Log operations taking >50ms
+            print(f"🧵 State update: {len(current_state)} neurons, "
+                  f"{len(weights)} connections in {elapsed:.3f}s")
 
         self.state_update_result.emit({'processed_state': final_state})
 
     def _get_neuron_value(self, val):
         """Convert various value types to float for calculations."""
-        if isinstance(val, (int, float)):
-            return float(val)
         if isinstance(val, bool):
             return 100.0 if val else 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
         return 0.0

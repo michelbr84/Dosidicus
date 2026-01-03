@@ -3068,7 +3068,7 @@ class BrainWidget(QtWidgets.QWidget):
 
     def draw_connections(self, painter, scale):
         """
-        Draw connections with extended 2-second weight-change animations.
+        Optimized connection drawing with performance improvements for large networks.
         Links are forced INVISIBLE while core neurons are still being revealed.
         Includes special visualization for Stress->Anxiety inhibitory links.
         """
@@ -3083,9 +3083,20 @@ class BrainWidget(QtWidgets.QWidget):
         if _PERF_TRACKING_AVAILABLE:
             _conn_start = time.perf_counter()
 
-        # absolutely no connections until every core neuron is completely revealed (tutorial mode guard). 
+        # absolutely no connections until every core neuron is completely revealed (tutorial mode guard).
         if self.is_tutorial_mode and len(self.visible_neurons) < len(self.original_neurons):
             return
+
+        # PERFORMANCE OPTIMIZATION: For very large networks, limit connections drawn
+        max_connections_to_draw = 500  # Cap rendering to prevent UI freeze
+        total_weights = len(self.weights)
+        if total_weights > max_connections_to_draw:
+            # Sample connections to draw (prioritize stronger connections)
+            sorted_weights = sorted(self.weights.items(), key=lambda x: abs(x[1]), reverse=True)
+            weights_to_draw = dict(sorted_weights[:max_connections_to_draw])
+            print(f"🎨 Rendering limited to {max_connections_to_draw}/{total_weights} strongest connections")
+        else:
+            weights_to_draw = self.weights
         
         # ===== NEURAL STYLE: Use dedicated neural renderer =====
         if self.anim_neural_pulse_enabled:
@@ -3096,7 +3107,7 @@ class BrainWidget(QtWidgets.QWidget):
         connections_drawn = 0
         connections_skipped = 0
 
-        for key, weight in self.weights.items():
+        for key, weight in weights_to_draw.items():
             if not isinstance(key, tuple) or len(key) != 2:
                 continue
             source, target = key

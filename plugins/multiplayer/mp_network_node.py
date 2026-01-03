@@ -14,7 +14,8 @@ import logging # Ensure logging is imported
 from typing import Dict, Any, Optional, List, Tuple, cast
 
 # Import constants
-from .mp_constants import MULTICAST_GROUP, MULTICAST_PORT, MAX_PACKET_SIZE
+from .mp_constants import MULTICAST_GROUP, MULTICAST_PORT, MAX_PACKET_SIZE, SHARED_SECRET
+from .packet_validator import PacketValidator
 
 
 class NetworkNode:
@@ -310,20 +311,18 @@ class NetworkNode:
         }
 
         try:
-            data_to_send: bytes
-            serialized_message = json.dumps(message_data).encode('utf-8')
+            # Encrypt the message
+            encrypted_data = self.utils.encrypt_message(message_data, SHARED_SECRET)
+            # Sign the encrypted data
+            signature = self.utils.sign_message(encrypted_data, SHARED_SECRET)
+            # Combine signature + encrypted data
+            data_to_send = signature + encrypted_data
 
             if self.use_compression:
-                # Use NetworkUtilities for compression if available, else direct zlib
-                if self.utils and hasattr(self.utils, 'compress_message'):
-                    # Assuming compress_message takes the dict and returns bytes
-                    data_to_send = self.utils.compress_message(message_data) 
-                else: # Fallback to direct zlib if NetworkUtilities or method missing
-                    data_to_send = zlib.compress(serialized_message)
+                # Compress the signed and encrypted data
+                data_to_send = zlib.compress(data_to_send)
                 if self.debug_mode and message_type.upper() in ["SQUID_EXIT", "SQUID_RETURN"]:
-                    self.logger.debug(f"DEBUG_COMPRESS (send): Type: {message_type}. Original: {len(serialized_message)}, Compressed: {len(data_to_send)}")
-            else: 
-                data_to_send = serialized_message
+                    self.logger.debug(f"DEBUG_COMPRESS (send): Type: {message_type}. Encrypted: {len(signature + encrypted_data)}, Compressed: {len(data_to_send)}")
 
             if len(data_to_send) > MAX_PACKET_SIZE:
                 self.logger.warning(f"Message '{message_type}' size ({len(data_to_send)}) exceeds MAX_PACKET_SIZE. May fail or be fragmented (UDP handles this, but can be less reliable).")
@@ -340,7 +339,7 @@ class NetworkNode:
             self.logger.error(f"Socket error sending message '{message_type}': {sock_err}")
             self.is_connected = False # Assume connection is broken
             self.stop_listening() # Stop listener as connection is likely bad
-        except Exception as e: # Other errors (JSON encoding, compression etc.)
+        except Exception as e: # Other errors (encryption, signing etc.)
             self.logger.error(f"Error sending message '{message_type}': {e}", exc_info=self.debug_mode)
         return False
 
@@ -365,16 +364,15 @@ class NetworkNode:
         }
 
         try:
-            data_to_send: bytes
-            serialized_batch = json.dumps(batch_data).encode('utf-8')
+            # Encrypt the batch data
+            encrypted_data = self.utils.encrypt_message(batch_data, SHARED_SECRET)
+            # Sign the encrypted data
+            signature = self.utils.sign_message(encrypted_data, SHARED_SECRET)
+            # Combine signature + encrypted data
+            data_to_send = signature + encrypted_data
 
             if self.use_compression:
-                if self.utils and hasattr(self.utils, 'compress_message'):
-                    data_to_send = self.utils.compress_message(batch_data)
-                else:
-                    data_to_send = zlib.compress(serialized_batch)
-            else: 
-                data_to_send = serialized_batch
+                data_to_send = zlib.compress(data_to_send)
 
             if len(data_to_send) > MAX_PACKET_SIZE:
                 self.logger.warning(f"Batch message size ({len(data_to_send)}) exceeds MAX_PACKET_SIZE. Transmission may fail.")
@@ -442,37 +440,44 @@ class NetworkNode:
             
             message_dict = None
             decoded_successfully = False
-            # Try decoding (with or without compression)
+            # Try decoding with security
             try:
-                data_for_json_decode = raw_data
+                data_to_process = raw_data
                 if self.use_compression:
                     try:
-                        if self.utils and hasattr(self.utils, 'decompress_message'):
-                            # Assumes decompress_message returns a dict or raises error
-                            message_dict = cast(Dict[str, Any], self.utils.decompress_message(raw_data))
-                        else: # Fallback to direct zlib + json
-                            data_for_json_decode = zlib.decompress(raw_data)
-                            message_dict = cast(Dict[str, Any], json.loads(data_for_json_decode.decode('utf-8')))
-                        decoded_successfully = True
-                    except (zlib.error, TypeError) as e_zlib: # TypeError if utils.decompress_message fails unexpectedly
-                        # If zlib fails, it might be an uncompressed message. Try decoding raw_data as JSON.
-                        if self.debug_mode: self.logger.debug(f"Zlib decompression failed from {addr} (Sender: {temp_node_id_peek}): {e_zlib}. Trying as uncompressed JSON.")
-                        # data_for_json_decode remains raw_data
-                        message_dict = cast(Dict[str, Any], json.loads(raw_data.decode('utf-8')))
-                        decoded_successfully = True # If this line is reached, uncompressed JSON was successful
-                else: # Not using compression, just decode JSON
-                    message_dict = cast(Dict[str, Any], json.loads(raw_data.decode('utf-8')))
-                    decoded_successfully = True
-            
-            except (json.JSONDecodeError, UnicodeDecodeError) as e_decode:
-                if self.debug_mode: self.logger.warning(f"Failed to decode JSON/UTF-8 from {addr} (Sender: {temp_node_id_peek}). Error: {e_decode}. Data: {raw_data[:80]}")
-                continue # Skip this malformed packet
-            except Exception as e_general_decode: # Catch-all for other unexpected decoding issues
-                if self.debug_mode: self.logger.error(f"General error decoding packet from {addr} (Sender: {temp_node_id_peek}): {e_general_decode}", exc_info=True)
+                        data_to_process = zlib.decompress(raw_data)
+                    except zlib.error:
+                        # If decompression fails, assume uncompressed
+                        pass
+
+                # Extract signature and encrypted data
+                signature_length = 32  # SHA256 HMAC is 32 bytes
+                if len(data_to_process) < signature_length:
+                    if self.debug_mode: self.logger.warning(f"Packet too short from {addr}")
+                    continue
+                signature = data_to_process[:signature_length]
+                encrypted_data = data_to_process[signature_length:]
+
+                # Verify signature
+                if not self.utils.verify_signature(encrypted_data, signature, SHARED_SECRET):
+                    if self.debug_mode: self.logger.warning(f"Invalid signature from {addr}")
+                    continue
+
+                # Decrypt
+                message_dict = self.utils.decrypt_message(encrypted_data, SHARED_SECRET)
+                decoded_successfully = True
+
+                # Validate the message
+                is_valid, error_msg = PacketValidator.validate_message(message_dict)
+                if not is_valid:
+                    if self.debug_mode: self.logger.warning(f"Message validation failed from {addr}: {error_msg}")
+                    continue
+
+            except Exception as e_decode:
+                if self.debug_mode: self.logger.warning(f"Failed to decode/verify/decrypt/validate from {addr} (Sender: {temp_node_id_peek}). Error: {e_decode}. Data: {raw_data[:80]}")
                 continue
 
-            if not decoded_successfully or 'node_id' not in message_dict:
-                if self.debug_mode: self.logger.debug(f"Invalid or incomplete message structure after all decode attempts from {addr} (Sender: {temp_node_id_peek}): {message_dict}")
+            if not decoded_successfully:
                 continue
             
             final_sender_node_id = cast(str, message_dict['node_id'])

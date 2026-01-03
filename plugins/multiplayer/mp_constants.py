@@ -15,6 +15,10 @@ MULTICAST_PORT = 10000            # Port number for multicast communication
 SYNC_INTERVAL = 1.0               # Default seconds between game state sync broadcasts
 MAX_PACKET_SIZE = 1472           # Maximum UDP packet size, to prevent fragmentation
 
+# --- Security Configuration ---
+# Shared secret for encryption and authentication
+SHARED_SECRET = b'dosidicus_multiplayer_secret_key_32'  # 32 bytes for AES-256
+
 USE_TCP        = False   # default – restored from ini
 TCP_IP_LIST    = []      # will be ['192.168.1.50','192.168.1.51',…]
 TCP_PORT       = 5008

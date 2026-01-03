@@ -6,6 +6,11 @@ import socket # Make sure socket is imported if get_local_ip uses it
 import time   # Make sure time is imported if is_node_active uses it
 import uuid   # Make sure uuid is imported if generate_node_id uses it
 from typing import Dict, Any, Union, List, Tuple # Ensure all used types are imported
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding, hashes, hmac
+from cryptography.hazmat.backends import default_backend
+import os
+import base64
 
 # It's good practice to have a logger for utilities if they are complex
 # import logging
@@ -161,6 +166,65 @@ class NetworkUtilities:
         """Generate a unique node identifier with a given prefix."""
         # Generate a UUID and take a portion of its hex representation for brevity
         return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+    @staticmethod
+    def encrypt_message(message: Dict[str, Any], key: bytes) -> bytes:
+        """Encrypt a message dictionary using AES."""
+        try:
+            # Serialize to JSON
+            data = json.dumps(message).encode('utf-8')
+            # Pad the data
+            padder = padding.PKCS7(algorithms.AES.block_size).padder()
+            padded_data = padder.update(data) + padder.finalize()
+            # Generate IV
+            iv = os.urandom(16)
+            # Encrypt
+            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+            encryptor = cipher.encryptor()
+            encrypted = encryptor.update(padded_data) + encryptor.finalize()
+            # Return IV + encrypted data, base64 encoded for easy transmission
+            return base64.b64encode(iv + encrypted)
+        except Exception as e:
+            raise ValueError(f"Encryption failed: {e}")
+
+    @staticmethod
+    def decrypt_message(encrypted_data: bytes, key: bytes) -> Dict[str, Any]:
+        """Decrypt bytes to a message dictionary using AES."""
+        try:
+            # Decode from base64
+            data = base64.b64decode(encrypted_data)
+            # Extract IV
+            iv = data[:16]
+            encrypted = data[16:]
+            # Decrypt
+            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+            decryptor = cipher.decryptor()
+            padded_data = decryptor.update(encrypted) + decryptor.finalize()
+            # Unpad
+            unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+            data = unpadder.update(padded_data) + unpadder.finalize()
+            # Deserialize from JSON
+            return json.loads(data.decode('utf-8'))
+        except Exception as e:
+            raise ValueError(f"Decryption failed: {e}")
+
+    @staticmethod
+    def sign_message(data: bytes, key: bytes) -> bytes:
+        """Generate HMAC signature for data."""
+        h = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+        h.update(data)
+        return h.finalize()
+
+    @staticmethod
+    def verify_signature(data: bytes, signature: bytes, key: bytes) -> bool:
+        """Verify HMAC signature for data."""
+        try:
+            h = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+            h.update(data)
+            h.verify(signature)
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def is_node_active(last_seen_time: float, threshold: float = 30.0) -> bool: # Increased threshold
