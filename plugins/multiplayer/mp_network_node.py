@@ -17,6 +17,13 @@ from typing import Dict, Any, Optional, List, Tuple, cast
 from .mp_constants import MULTICAST_GROUP, MULTICAST_PORT, MAX_PACKET_SIZE, SHARED_SECRET
 from .packet_validator import PacketValidator
 
+# Import security manager for rate limiting and replay protection
+try:
+    from .network_utilities import get_security_manager, SecurityManager
+    _HAS_SECURITY_MANAGER = True
+except ImportError:
+    _HAS_SECURITY_MANAGER = False
+
 
 class NetworkNode:
     node_id: str
@@ -37,6 +44,7 @@ class NetworkNode:
     last_sync_time: float
     debug_mode: bool
     utils: Optional[Any]
+    security_mgr: Optional[Any]
 
     def __init__(self, node_id: Optional[str] = None, logger: Optional[logging.Logger] = None):
         """
@@ -57,6 +65,12 @@ class NetworkNode:
             self.node_id = node_id or f"squid_{uuid.uuid4().hex[:8]}"
             self.utils = None # Mark utils as unavailable
 
+        # Initialize security manager for rate limiting and replay protection
+        if _HAS_SECURITY_MANAGER:
+            self.security_mgr = get_security_manager(SHARED_SECRET)
+        else:
+            self.security_mgr = None
+
         self.local_ip = self._get_local_ip()
         self.socket = None
         self.initialized = False # Socket structure initialized (IP_ADD_MEMBERSHIP etc.)
@@ -76,6 +90,10 @@ class NetworkNode:
         self.known_nodes = {} # Stores info about other detected nodes
         self.last_sync_time = 0 # Timestamp of the last sync operation
         self.debug_mode = False # Controlled by MultiplayerPlugin
+        
+        # Rate limiting tracking (for sources without full security manager)
+        self._rate_limit_counters: Dict[str, List[float]] = {}
+        self._last_security_cleanup = time.time()
 
         if logger is not None:
             self.logger = logger
@@ -91,6 +109,7 @@ class NetworkNode:
                 self.logger.setLevel(logging.DEBUG if self.debug_mode else logging.INFO)
         
         self.initialize_socket_structure() # Initialize socket when a NetworkNode is created
+
 
     def _get_local_ip(self):
         """Tries to get the primary local IP that can connect externally."""
@@ -408,6 +427,12 @@ class NetworkNode:
 
         received_messages_this_call: List[Tuple[Dict[str, Any], Tuple[str, int]]] = []
         
+        # Periodic security cleanup (every 60 seconds)
+        current_time = time.time()
+        if current_time - self._last_security_cleanup > 60:
+            self._cleanup_security_state()
+            self._last_security_cleanup = current_time
+        
         # Process all items currently in the queue
         while not self.incoming_queue.empty():
             try:
@@ -419,6 +444,14 @@ class NetworkNode:
             except Exception as e_q: # Should not happen for basic queue ops
                 self.logger.error(f"Error getting item from incoming_queue: {e_q}")
                 continue
+
+            # Rate limiting check
+            source_ip = addr[0]
+            if not self._check_rate_limit(source_ip):
+                if self.debug_mode:
+                    self.logger.warning(f"Rate limit exceeded for {source_ip}, dropping packet")
+                continue
+
 
             # Peek at sender_node_id from raw data if possible (for debug log context)
             temp_node_id_peek = "unknown_at_raw_recv"
@@ -561,12 +594,81 @@ class NetworkNode:
                 self.logger.error(f"Error in process_messages loop: {e}", exc_info=self.debug_mode)
                 break # Exit loop on error to avoid continuous failure on same bad data
 
+    def _check_rate_limit(self, source_ip: str) -> bool:
+        """
+        Check if a source IP is within rate limits.
+        
+        Returns:
+            True if within limits, False if rate limited
+        """
+        # Try to use SecurityManager first (centralized tracking)
+        if self.security_mgr and hasattr(self.security_mgr, 'check_rate_limit'):
+            return self.security_mgr.check_rate_limit(source_ip)
+        
+        # Fallback to local rate limiting
+        current_time = time.time()
+        window = 1.0  # 1 second window
+        max_packets = 60  # Max packets per second per source
+        
+        if source_ip not in self._rate_limit_counters:
+            self._rate_limit_counters[source_ip] = []
+        
+        # Remove old timestamps
+        self._rate_limit_counters[source_ip] = [
+            t for t in self._rate_limit_counters[source_ip]
+            if current_time - t < window
+        ]
+        
+        # Check limit
+        if len(self._rate_limit_counters[source_ip]) >= max_packets:
+            return False
+        
+        # Record this packet
+        self._rate_limit_counters[source_ip].append(current_time)
+        return True
+    
+    def _cleanup_security_state(self) -> None:
+        """
+        Periodic cleanup of security-related state to prevent memory growth.
+        Should be called periodically (e.g., every 60 seconds).
+        """
+        current_time = time.time()
+        
+        # Clean up old rate limit counters
+        window = 2.0  # Keep 2 seconds of history
+        for source_ip in list(self._rate_limit_counters.keys()):
+            self._rate_limit_counters[source_ip] = [
+                t for t in self._rate_limit_counters[source_ip]
+                if current_time - t < window
+            ]
+            # Remove empty entries
+            if not self._rate_limit_counters[source_ip]:
+                del self._rate_limit_counters[source_ip]
+        
+        # Clean up security manager state if available
+        if self.security_mgr and hasattr(self.security_mgr, 'cleanup_old_state'):
+            self.security_mgr.cleanup_old_state()
+        
+        # Clean up old known_nodes (inactive for more than 5 minutes)
+        inactive_threshold = 300  # 5 minutes
+        for node_id in list(self.known_nodes.keys()):
+            _, last_seen, _ = self.known_nodes[node_id]
+            if current_time - last_seen > inactive_threshold:
+                del self.known_nodes[node_id]
+                if self.debug_mode:
+                    self.logger.debug(f"Removed inactive node: {node_id}")
+
     def close(self):
         """Cleans up the network node, stops listening, and closes the socket."""
         self.logger.info(f"Closing network node {self.node_id}...")
         self.auto_reconnect = False # Prevent any further reconnect attempts during closure
         
         self.stop_listening() # Signal listener thread to stop and wait for it
+        
+        # Clean up security state
+        self._rate_limit_counters.clear()
+        if self.security_mgr:
+            self.security_mgr = None
                
         if self.socket:
             socket_was_initialized_and_connected = self.initialized and self.is_connected

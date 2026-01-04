@@ -402,11 +402,120 @@ class BrainWidget(QtWidgets.QWidget):
                 pass
     
     def closeEvent(self, event):
-        """Handle widget close - clean up brain bridge."""
+        """Handle widget close - clean up brain bridge and all resources."""
         self.cleanup_brain_bridge()
         self._cleanup_render_worker()
+        self._cleanup_memory()
         super().closeEvent(event) if hasattr(super(), 'closeEvent') else None
         event.accept()
+    
+    def _cleanup_memory(self):
+        """
+        Comprehensive memory cleanup to prevent leaks in long-running sessions.
+        Should be called on close or periodically for very long sessions.
+        """
+        # Stop all timers to prevent callbacks
+        timers_to_stop = [
+            'animation_timer', 'neurogenesis_timer', '_brain_export_timer',
+            '_render_timer', '_link_fade_timer', 'tutorial_glow_timer'
+        ]
+        for timer_name in timers_to_stop:
+            timer = getattr(self, timer_name, None)
+            if timer and hasattr(timer, 'stop'):
+                try:
+                    timer.stop()
+                except:
+                    pass
+        
+        # Disconnect signals from brain_worker to prevent callbacks
+        if hasattr(self, 'brain_worker') and self.brain_worker:
+            try:
+                self.brain_worker.neurogenesis_result.disconnect()
+                self.brain_worker.hebbian_result.disconnect()
+                self.brain_worker.state_update_result.disconnect()
+                self.brain_worker.error_occurred.disconnect()
+            except:
+                pass
+        
+        # Clear bounded caches (animation state)
+        animation_caches = [
+            '_ambient_pulse_state', '_comm_glow_packets', '_comm_glow_last_spawn',
+            '_neural_pulses', '_link_opacities', '_link_targets', '_link_fade_speeds',
+            '_link_start_times', 'neuron_reveal_animations'
+        ]
+        for cache_name in animation_caches:
+            cache = getattr(self, cache_name, None)
+            if cache is not None and hasattr(cache, 'clear'):
+                cache.clear()
+        
+        # Clear history lists
+        if hasattr(self, 'history'):
+            self.history = self.history[-100:] if len(self.history) > 100 else self.history
+        if hasattr(self, 'training_data'):
+            self.training_data = self.training_data[-100:] if len(self.training_data) > 100 else self.training_data
+        
+        # Clear cached render
+        self._cached_render = None
+        
+        # Clear cached paint objects
+        if hasattr(self, '_cached_fonts'):
+            self._cached_fonts.clear()
+        if hasattr(self, '_cached_pens'):
+            self._cached_pens.clear()
+        
+        # Clear communication events older than threshold
+        current_time = time.time()
+        old_events = [n for n, t in self.communication_events.items() 
+                      if current_time - t > 60]
+        for n in old_events:
+            self.communication_events[n] = 0
+        
+        # Clear weight change events
+        if hasattr(self, 'weight_change_events'):
+            self.weight_change_events.clear()
+        
+        # Clear weight animations
+        if hasattr(self, 'weight_animations'):
+            self.weight_animations.clear()
+        
+        print("🧹 BrainWidget memory cleanup completed")
+    
+    def periodic_cleanup(self):
+        """
+        Periodic cleanup for very long sessions.
+        Call this every 10-30 minutes to prevent memory growth.
+        """
+        # Limit history sizes
+        max_history = 1000
+        if hasattr(self, 'history') and len(self.history) > max_history:
+            self.history = self.history[-max_history:]
+        if hasattr(self, 'training_data') and len(self.training_data) > max_history:
+            self.training_data = self.training_data[-max_history:]
+        
+        # Clean up old animation state
+        current_time = time.time()
+        
+        # Clean up old communication glow packets
+        if hasattr(self, '_comm_glow_packets'):
+            for key in list(self._comm_glow_packets.keys()):
+                # Remove completed packets
+                self._comm_glow_packets[key] = [
+                    p for p in self._comm_glow_packets[key]
+                    if p.get('progress', 1.0) < 1.0
+                ]
+                # Remove empty entries
+                if not self._comm_glow_packets[key]:
+                    del self._comm_glow_packets[key]
+        
+        # Clean up old ambient pulse state (keep only for active connections)
+        if hasattr(self, '_ambient_pulse_state'):
+            active_connections = set(self.weights.keys())
+            old_keys = [k for k in self._ambient_pulse_state.keys() 
+                       if k not in active_connections]
+            for k in old_keys:
+                del self._ambient_pulse_state[k]
+
+
 
 
     def set_debug_mode(self, enabled):

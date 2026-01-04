@@ -70,11 +70,31 @@ def perform_cleanup_and_exit():
     print(f"✨ Cleanup complete. Removed {deleted_count} directories.")
 
 def global_exception_handler(exctype, value, tb):
-    """Global exception handler to log unhandled exceptions"""
+    """Global exception handler to log unhandled exceptions and generate crash reports"""
     error_message = ''.join(traceback.format_exception(exctype, value, tb))
     logging.error("Unhandled exception:\n%s", error_message)
+    
+    # Capture with bug tracker for pattern analysis
+    try:
+        from src.bug_tracker import get_bug_tracker
+        tracker = get_bug_tracker()
+        tracker.capture_exception(
+            exc_info=(exctype, value, tb),
+            severity='critical',
+            context={'unhandled': True, 'source': 'global_exception_handler'}
+        )
+        
+        # Save crash report
+        if tracker.auto_save:
+            crash_report_path = tracker.save_crash_report()
+            print(f"Crash report saved to: {crash_report_path}")
+    except Exception as tracker_err:
+        # Don't let tracker errors prevent the original error from being shown
+        logging.warning(f"Bug tracker error: {tracker_err}")
+    
     QtWidgets.QMessageBox.critical(None, "Error", 
                                  "An unexpected error occurred. Please check dosidicus_log.txt for details.")
+
 
 
 class TeeStream:
