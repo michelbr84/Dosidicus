@@ -1,0 +1,260 @@
+name: Dosidicus CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ===========================================
+  # Code Quality & Testing
+  # ===========================================
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy
+          
+      - name: Run Black (formatting check)
+        run: black --check --diff src/ plugins/
+        continue-on-error: true
+        
+      - name: Run isort (import sorting)
+        run: isort --check-only --diff src/ plugins/
+        continue-on-error: true
+        
+      - name: Run Flake8 (linting)
+        run: flake8 src/ plugins/ --max-line-length=120 --ignore=E501,W503
+        continue-on-error: true
+
+  test:
+    name: Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-xinerama0 libxcb-cursor0
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          pip install -e .
+          
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --cov=src --cov-report=xml
+          
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ===========================================
+  # Build Artifacts
+  # ===========================================
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+          
+      - name: Build executable
+        run: |
+          pyinstaller --name Dosidicus --windowed --icon=images/icon.ico --add-data "images;images" --add-data "plugins;plugins" --add-data "brains;brains" main.py
+          
+      - name: Create archive
+        run: Compress-Archive -Path dist/Dosidicus -DestinationPath dist/Dosidicus-windows.zip
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/Dosidicus-windows.zip
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-xinerama0 libxcb-cursor0
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+          
+      - name: Build executable
+        run: |
+          pyinstaller --name Dosidicus --windowed --add-data "images:images" --add-data "plugins:plugins" --add-data "brains:brains" main.py
+          
+      - name: Create archive
+        run: tar -czvf dist/Dosidicus-linux.tar.gz -C dist Dosidicus
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: dist/Dosidicus-linux.tar.gz
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+          
+      - name: Build executable
+        run: |
+          pyinstaller --name Dosidicus --windowed --add-data "images:images" --add-data "plugins:plugins" --add-data "brains:brains" main.py
+          
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Dosidicus" -srcfolder dist/Dosidicus.app -ov -format UDZO dist/Dosidicus-macos.dmg
+        continue-on-error: true
+        
+      - name: Fallback to archive
+        if: failure()
+        run: tar -czvf dist/Dosidicus-macos.tar.gz -C dist Dosidicus.app
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: dist/Dosidicus-macos.*
+
+  # ===========================================
+  # Release
+  # ===========================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-macos]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/windows-build/*
+            artifacts/linux-build/*
+            artifacts/macos-build/*
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================
+  # Documentation
+  # ===========================================
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mkdocs mkdocs-material
+          
+      - name: Build docs
+        run: mkdocs build
+        continue-on-error: true
+        
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
